@@ -39,6 +39,15 @@ def remind(client, channel_id, logger)
   end
 end
 
+def wakeup(rtm_client, logger)
+  rtm_client.start!
+  while true
+    sleep(3600)
+    rtm_client.ping
+    rtm_client.start!
+  end
+end
+
 Slack.configure do |config|
   config.token = ENV['SLACK_TOKEN']
   config.logger = logger
@@ -46,7 +55,7 @@ Slack.configure do |config|
 end
 
 web_client = Slack::Web::Client.new()
-rtm_client = Slack::RealTime::Client.new()
+rtm_client = Slack::RealTime::Client.new(websocket_ping: 42)
 
 rtm_client.on :hello do
   puts "Successfully connected, welcome '#{rtm_client.self.name}' to the '#{rtm_client.team.name}' team at https://#{rtm_client.team.domain}.slack.com."
@@ -74,7 +83,7 @@ rtm_client.on :closed do |_data|
 end
 
 lake_channel_id = web_client.groups_info(channel: "#lake-secret").group["id"]
-rtm_client_thread=Thread.new{rtm_client.start!}
+rtm_client_thread=Thread.new{wakeup(rtm_client, logger)}
 reminder_thread=Thread.new{remind(web_client, lake_channel_id, logger)}
 
 [ reminder_thread, rtm_client_thread ].each do |t|
