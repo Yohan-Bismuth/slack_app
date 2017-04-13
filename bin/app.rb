@@ -39,13 +39,38 @@ def remind(client, channel_id, logger)
   end
 end
 
-def wakeup(rtm_client, logger)
-  rtm_client.start!
-  while true
-    sleep(3600)
-    rtm_client.ping
-    rtm_client.start!
+def start_rtm_client(logger)
+  rtm_client = Slack::RealTime::Client.new()
+  Slack::RealTime::Client do |config|
+    config.token = ENV['SLACK_TOKEN']
+    config.logger = logger
+    config.logger.level = Logger::INFO
   end
+
+  rtm_client.start!
+  rtm_client.on :hello do
+    puts "Successfully connected, welcome '#{rtm_client.self.name}' to the '#{rtm_client.team.name}' team at https://#{rtm_client.team.domain}.slack.com."
+  end
+
+  rtm_client.on :message do |data|
+    case data.text
+    when 'lakebot pi' then
+      rtm_client.message channel: data.channel, text: "Lake PI is #{getPi(logger)} today"
+    when 'lakebot nextpi' then
+      rtm_client.message channel: data.channel, text: "Lake new PI is #{getNextPi(logger)} today"
+    when 'lakebot previouspi' then
+      rtm_client.message channel: data.channel, text: "Lake new PI is #{getPreviousPi(logger)} today"
+    when /^lakebot / then
+      rtm_client.message channel: data.channel, text: "Wrong request"
+    end
+  end
+
+  # Experimenting a reconnect mechanism
+  rtm_client.on :closed do |_data|
+    puts "Rtm_Client has disconnected !"
+    start_rtm_client(logger)
+  end
+
 end
 
 Slack.configure do |config|
@@ -55,35 +80,9 @@ Slack.configure do |config|
 end
 
 web_client = Slack::Web::Client.new()
-rtm_client = Slack::RealTime::Client.new(websocket_ping: 42)
-
-rtm_client.on :hello do
-  puts "Successfully connected, welcome '#{rtm_client.self.name}' to the '#{rtm_client.team.name}' team at https://#{rtm_client.team.domain}.slack.com."
-end
-
-rtm_client.on :message do |data|
-  case data.text
-  when 'lakebot pi' then
-    rtm_client.message channel: data.channel, text: "Lake PI is #{getPi(logger)} today"
-  when 'lakebot nextpi' then
-    rtm_client.message channel: data.channel, text: "Lake new PI is #{getNextPi(logger)} today"
-  when 'lakebot previouspi' then
-    rtm_client.message channel: data.channel, text: "Lake new PI is #{getPreviousPi(logger)} today"
-  when /^lakebot / then
-    rtm_client.message channel: data.channel, text: "Wrong request"
-  end
-end
-
-rtm_client.on :close do |_data|
-  puts "Rtm_Client is about to disconnect"
-end
-
-rtm_client.on :closed do |_data|
-  puts "Rtm_Client has disconnected successfully!"
-end
 
 lake_channel_id = web_client.groups_info(channel: "#lake-secret").group["id"]
-rtm_client_thread=Thread.new{wakeup(rtm_client, logger)}
+rtm_client_thread=Thread.new{run_rtm_client(logger)}
 reminder_thread=Thread.new{remind(web_client, lake_channel_id, logger)}
 
 [ reminder_thread, rtm_client_thread ].each do |t|
